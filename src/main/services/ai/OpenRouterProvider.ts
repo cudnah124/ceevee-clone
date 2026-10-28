@@ -1,7 +1,7 @@
 import { IAIProvider } from './IAIProvider'
 
 export class OpenRouterProvider implements IAIProvider {
-  async generateCompletion(prompt: string, apiKey: string, model: string): Promise<string> {
+  async generateCompletion(prompt: string, apiKey: string, model: string, _filePath?: string): Promise<string> {
     if (!apiKey) throw new Error('OpenRouter API key is missing.')
 
     try {

@@ -49,7 +49,7 @@ export function SearchView() {
     }
   }
 
-  const runSearch = async (description = jobDescription) => {
+  const runSearch = async (description = jobDescription, saveToHistory = true) => {
     const trimmed = description.trim()
     if (!trimmed) {
       toast.error('Paste a job description before searching.')
@@ -59,7 +59,8 @@ export function SearchView() {
     setIsSearching(true)
     const response = await window.api.searchCandidatesForJobDescription({
       jobDescription: trimmed,
-      limit: 25
+      limit: 25,
+      saveToHistory
     })
     setIsSearching(false)
 
@@ -95,7 +96,7 @@ export function SearchView() {
           ) : history.map((item) => (
             <button
               key={item.id}
-              onClick={() => runSearch(item.job_description)}
+              onClick={() => runSearch(item.job_description, false)}
               className="w-full rounded-md border border-border bg-card p-3 text-left text-sm transition-colors hover:bg-accent"
             >
               <span className="line-clamp-3 text-foreground">{item.job_description}</span>

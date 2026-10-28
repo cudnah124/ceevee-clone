@@ -8,7 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Download, Calendar as CalendarIcon } from "lucide-react";
+import { Download, Calendar as CalendarIcon, MapPin } from "lucide-react";
 import { format } from "date-fns";
 import { DateRange } from "react-day-picker";
 import { cn } from "@/lib/utils";
@@ -28,6 +28,8 @@ interface CVSearchAndFilterBarProps {
   setStatus: (s: string) => void;
   jobType: string;
   setJobType: (j: string) => void;
+  location: string;
+  setLocation: (l: string) => void;
   dateRange: DateRange | undefined;
   setDateRange: (d: DateRange | undefined) => void;
   onExportCsv?: () => void;
@@ -42,20 +44,31 @@ export function CVSearchAndFilterBar({
   setStatus,
   jobType,
   setJobType,
+  location,
+  setLocation,
   dateRange,
   setDateRange,
   onExportCsv,
 }: CVSearchAndFilterBarProps) {
   const [customTags, setCustomTags] = useState<any[]>([]);
+  const [locations, setLocations] = useState<string[]>([]);
 
   useEffect(() => {
     loadTags();
+    loadLocations();
   }, []);
 
   const loadTags = async () => {
     const res = await window.api.getCustomTags();
     if (res.success) {
       setCustomTags(res.data || []);
+    }
+  };
+
+  const loadLocations = async () => {
+    const res = await window.api.getDistinctLocations();
+    if (res.success && res.data) {
+      setLocations(res.data);
     }
   };
 
@@ -106,6 +119,7 @@ export function CVSearchAndFilterBar({
             <SelectItem value="all">All Statuses</SelectItem>
             <SelectItem value="Pending Review">Pending Review</SelectItem>
             <SelectItem value="Interviewing">Interviewing</SelectItem>
+            <SelectItem value="Offered">Offered</SelectItem>
             <SelectItem value="Rejected">Rejected</SelectItem>
             {statuses.map((s) => (
               <SelectItem key={s.id} value={s.name}>
@@ -124,6 +138,28 @@ export function CVSearchAndFilterBar({
             {jobTypes.map((jt) => (
               <SelectItem key={jt.id} value={jt.name}>
                 {jt.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        {/* Location filter */}
+        <Select value={location} onValueChange={setLocation}>
+          <SelectTrigger className="w-45">
+            <SelectValue placeholder="Location" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">
+              <span className="flex items-center gap-1.5">
+                <MapPin className="size-3 opacity-60" /> All Locations
+              </span>
+            </SelectItem>
+            {locations.map((loc) => (
+              <SelectItem key={loc} value={loc}>
+                <span className="flex items-center gap-1.5">
+                  <MapPin className="size-3 opacity-60" />
+                  {loc}
+                </span>
               </SelectItem>
             ))}
           </SelectContent>

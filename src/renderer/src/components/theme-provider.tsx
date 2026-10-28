@@ -77,7 +77,7 @@ export function ThemeProvider({
     let cssString = ""
     if (colorTheme === "sage_green") cssString = sageGreenCss
     else if (colorTheme === "warm") cssString = warmCss
-    else if (colorTheme === "custom") cssString = customStyle
+    else if (colorTheme === "custom") cssString = sanitizeCustomCss(customStyle)
 
     let styleEl = document.getElementById("tweakcn-theme")
     if (!styleEl) {
@@ -120,4 +120,17 @@ export const useTheme = () => {
     throw new Error("useTheme must be used within a ThemeProvider")
 
   return context
+}
+
+/**
+ * Strips PostCSS-only at-rules that are invalid inside a browser <style> tag.
+ * TweakCN exports include @import "tailwindcss" and @custom-variant which
+ * must go through a build pipeline — they silently break theming when injected raw.
+ */
+function sanitizeCustomCss(raw: string): string {
+  return raw
+    .split('\n')
+    .filter(line => !/^\s*@(import|custom-variant|layer|plugin)\b/.test(line))
+    .join('\n')
+    .trim()
 }

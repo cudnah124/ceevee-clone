@@ -71,6 +71,7 @@ declare global {
         jobDescription: string;
         filters?: CandidateSearchFilter[];
         limit?: number;
+        saveToHistory?: boolean;
       }) => Promise<{
         success: boolean;
         data?: {
@@ -176,6 +177,8 @@ declare global {
         provider: EmbeddingProviderName,
       ) => Promise<{ success: boolean; data?: Array<{ model_id: string; name: string }>; error?: string }>;
       deleteAllData: () => Promise<{ success: boolean; error?: string }>;
+      deleteDuplicateCandidates: () => Promise<{ success: boolean; deletedCount?: number; error?: string }>;
+      getDistinctLocations: () => Promise<{ success: boolean; data?: string[]; error?: string }>;
       getDashboardStats: () => Promise<{ success: boolean; data?: any; error?: string }>;
       getAppVersion: () => Promise<string>;
       getAppEnv: () => Promise<string>;

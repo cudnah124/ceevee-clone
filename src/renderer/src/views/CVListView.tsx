@@ -24,6 +24,7 @@ export function CVListView() {
   const [tag, setTag] = useState('all')
   const [status, setStatus] = useState('all')
   const [jobType, setJobType] = useState('all')
+  const [location, setLocation] = useState('all')
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined)
 
   useEffect(() => {
@@ -53,6 +54,8 @@ export function CVListView() {
           setStatus={setStatus}
           jobType={jobType}
           setJobType={setJobType}
+          location={location}
+          setLocation={setLocation}
           dateRange={dateRange}
           setDateRange={setDateRange}
           onExportCsv={handleExportCsv}
@@ -72,6 +75,7 @@ export function CVListView() {
             tag={tag} 
             status={status}
             jobType={jobType}
+            location={location}
             dateRange={dateRange}
             onView={(id) => setSelectedCandidateId(id)} 
             highlightedCandidateId={highlightedCandidateId}

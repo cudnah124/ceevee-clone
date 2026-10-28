@@ -1,4 +1,4 @@
-import db from '../db'
+import db, { hasCandidatesUpdatedAt } from '../db'
 import { VectorSearchService } from './VectorSearchService'
 import {
   CandidateSearchResult,
@@ -99,10 +99,11 @@ export class CandidateSearchService {
     }
 
     values.push(limit)
+    const orderCol = hasCandidatesUpdatedAt ? 'updated_at' : 'created_at'
     return db.prepare(`
       SELECT * FROM candidates
       WHERE ${clauses.join(' AND ')}
-      ORDER BY updated_at DESC, created_at DESC
+      ORDER BY ${orderCol} DESC, created_at DESC
       LIMIT ?
     `).all(...values) as SearchableCandidate[]
   }

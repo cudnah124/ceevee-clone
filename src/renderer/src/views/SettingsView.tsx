@@ -115,6 +115,11 @@ export function SettingsView() {
   const [searchQuery, setSearchQuery] = useState('')
   const [saveStatus, setSaveStatus] = useState('')
 
+  const [ocrProvider, setOcrProvider] = useState('none')
+  const [ocrApiKey, setOcrApiKey] = useState('')
+  const [ocrModel, setOcrModel] = useState('')
+  const [ocrSaveStatus, setOcrSaveStatus] = useState('')
+
   const filteredModels = useMemo(() => {
     if (!searchQuery) return models
     const lowerQuery = searchQuery.toLowerCase()
@@ -141,6 +146,7 @@ export function SettingsView() {
   const [deleteInputString, setDeleteInputString] = useState('')
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isDeletingAllData, setIsDeletingAllData] = useState(false)
+  const [isDeletingDuplicates, setIsDeletingDuplicates] = useState(false)
 
   const [customTags, setCustomTags] = useState<any[]>([])
   const [newTag, setNewTag] = useState('')
@@ -160,8 +166,15 @@ export function SettingsView() {
     window.api.getSavedProviderSettings('notion').then((res: any) => {
       if (res.success && res.data) setNotionDb(res.data.model || '')
     })
+    // Fix 1: load notion_auto_sync so checkbox restores on every open
     window.api.getAppSetting('notion_auto_sync').then((res: any) => {
-      if (res.success) setNotionAutoSync(res.value === 'true')
+      if (res.success && res.value) setNotionAutoSync(res.value === 'true')
+    })
+    window.api.getAppSetting('ocr_provider').then((res: any) => {
+      if (res.success && res.value) setOcrProvider(res.value)
+    })
+    window.api.getAppSetting('ocr_model').then((res: any) => {
+      if (res.success && res.value) setOcrModel(res.value)
     })
     loadTags()
     loadVectorStatus()
@@ -320,6 +333,32 @@ export function SettingsView() {
     }
   }
 
+  const handleSaveOcrSettings = async () => {
+    setOcrSaveStatus('Saving...')
+    const isLocked = await window.api.isKeystoreLocked()
+    if (isLocked) {
+      setOcrSaveStatus('Unlock keystore to save')
+      setShowPasswordDialog(true)
+      return
+    }
+
+    const resProvider = await window.api.setAppSetting('ocr_provider', ocrProvider)
+    const resModel = await window.api.setAppSetting('ocr_model', ocrModel)
+    
+    let resKey = { success: true }
+    if (ocrApiKey.trim()) {
+      resKey = await window.api.saveApiKey('ocr', ocrApiKey.trim(), ocrModel)
+    }
+
+    if (resProvider.success && resModel.success && resKey.success) {
+      setOcrSaveStatus('Saved successfully!')
+      toast.success('OCR Configuration saved!')
+    } else {
+      setOcrSaveStatus('Failed to save configuration')
+      toast.error('Failed to save OCR configuration')
+    }
+  }
+
   const handleSaveNotion = async () => {
     setNotionSaveStatus('Saving...')
     const isLocked = await window.api.isKeystoreLocked()
@@ -329,14 +368,17 @@ export function SettingsView() {
       return
     }
 
+    // Fix 2: save auto_sync + db_id BEFORE the token guard
+    // so toggling the checkbox without re-typing the token always persists
+    await window.api.setAppSetting('notion_auto_sync', notionAutoSync.toString())
+
     if (!notionKey.trim()) {
-      setNotionSaveStatus('Token cannot be empty')
+      // Token not changed — settings (auto_sync, db) already saved above
+      setNotionSaveStatus('Settings saved!')
       return
     }
 
     const res = await window.api.saveApiKey('notion', notionKey.trim(), notionDb.trim())
-    await window.api.setAppSetting('notion_auto_sync', notionAutoSync.toString())
-
     if (res.success) {
       setNotionSaveStatus('Saved successfully!')
     } else {
@@ -370,6 +412,17 @@ export function SettingsView() {
       setIsDeleteDialogOpen(false)
     } else {
       toast.error(`Failed to delete data: ${res.error}`)
+    }
+  }
+
+  const handleDeleteDuplicates = async () => {
+    setIsDeletingDuplicates(true)
+    const res = await window.api.deleteDuplicateCandidates()
+    setIsDeletingDuplicates(false)
+    if (res.success) {
+      toast.success(`Cleaned successfully! Deleted ${res.deletedCount || 0} duplicate candidates.`)
+    } else {
+      toast.error(`Failed to clean duplicates: ${res.error}`)
     }
   }
 
@@ -493,7 +546,7 @@ export function SettingsView() {
                     Paste the CSS variables string generated from tweakcn.com below.
                   </p>
                   <Textarea
-                    placeholder=":root { ... }"
+                    placeholder="Paste the full TweakCN output here (including @import lines). Non-CSS directives will be stripped automatically."
                     value={customStyle}
                     onChange={(e) => setCustomStyle(e.target.value)}
                     className="min-h-[150px] font-mono text-xs"
@@ -644,6 +697,51 @@ export function SettingsView() {
               </div>
             </div>
           </SettingsNestedRow>
+
+          <hr className="my-6 border-border" />
+
+          <SettingsNestedRow label="OCR Fallback Provider">
+            <Select value={ocrProvider} onValueChange={setOcrProvider}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Select OCR provider" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">None (Disabled)</SelectItem>
+                <SelectItem value="gemini">Gemini</SelectItem>
+                <SelectItem value="openai">OpenAI</SelectItem>
+                <SelectItem value="anthropic">Anthropic</SelectItem>
+              </SelectContent>
+            </Select>
+          </SettingsNestedRow>
+
+          {ocrProvider !== 'none' && (
+            <>
+              <SettingsNestedRow label="OCR API Key">
+                <div className="flex flex-col gap-2 w-72">
+                  <SecuredInput
+                    provider="ocr"
+                    value={ocrApiKey}
+                    onChange={setOcrApiKey}
+                    placeholder="Enter API Key for OCR"
+                  />
+                </div>
+              </SettingsNestedRow>
+              <SettingsNestedRow label="OCR Model" alignTop>
+                <div className="flex flex-col gap-3">
+                  <Input
+                    value={ocrModel}
+                    onChange={(e) => setOcrModel(e.target.value)}
+                    placeholder="e.g. gemini-1.5-flash or gpt-4o-mini"
+                    className="w-[280px]"
+                  />
+                  <div className="flex items-center gap-4 mt-2">
+                    <Button onClick={handleSaveOcrSettings} variant="secondary">Save OCR Configuration</Button>
+                    {ocrSaveStatus && <span className="text-sm text-muted-foreground">{ocrSaveStatus}</span>}
+                  </div>
+                </div>
+              </SettingsNestedRow>
+            </>
+          )}
         </SettingsAccordionItem>
 
         <SettingsAccordionItem
@@ -847,6 +945,21 @@ export function SettingsView() {
                     </AlertDialogFooter>
                   </AlertDialogContent>
                 </AlertDialog>
+              </div>
+            </div>
+          </SettingsNestedRow>
+          
+          <div className="h-px bg-border my-2 mx-6" />
+
+          <SettingsNestedRow label="Clean Duplicate CVs" alignTop>
+            <div className="flex flex-col gap-3 max-w-[400px]">
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                This will automatically scan the database for candidate profiles with duplicate emails, phone numbers, or full names, keeping only the newest entry.
+              </p>
+              <div>
+                <Button variant="outline" onClick={handleDeleteDuplicates} disabled={isDeletingDuplicates}>
+                  {isDeletingDuplicates ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Cleaning...</> : "Clean Duplicates"}
+                </Button>
               </div>
             </div>
           </SettingsNestedRow>

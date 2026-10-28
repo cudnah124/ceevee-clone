@@ -34,6 +34,7 @@ const api = {
     jobDescription: string
     filters?: { id: string; value: string | number | boolean | null }[]
     limit?: number
+    saveToHistory?: boolean
   }) => ipcRenderer.invoke('search-candidates-for-job-description', params),
   getJobSearchHistory: (limit?: number) => ipcRenderer.invoke('get-job-search-history', limit),
   getCustomTags: () => ipcRenderer.invoke('get-custom-tags'),
@@ -70,6 +71,8 @@ const api = {
   reindexCandidateVectors: () => ipcRenderer.invoke('reindex-candidate-vectors'),
   getEmbeddingModels: (provider: 'local' | 'openai' | 'gemini' | 'openrouter') => ipcRenderer.invoke('get-embedding-models', provider),
   deleteAllData: () => ipcRenderer.invoke('delete-all-data'),
+  deleteDuplicateCandidates: () => ipcRenderer.invoke('delete-duplicate-candidates'),
+  getDistinctLocations: () => ipcRenderer.invoke('get-distinct-locations'),
   getDashboardStats: () => ipcRenderer.invoke('get-dashboard-stats'),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   getAppEnv: () => ipcRenderer.invoke('get-app-env'),

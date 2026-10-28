@@ -1,5 +1,5 @@
 import { ipcMain, dialog } from 'electron'
-import db from '../db'
+import db, { hasCandidatesUpdatedAt } from '../db'
 import { NotionSyncService } from '../services/NotionSyncService'
 import { CandidateSearchService } from '../services/CandidateSearchService'
 import { CandidateSearchFilter } from '../services/CandidateSearchService'
@@ -41,6 +41,10 @@ class CandidateController {
             } else if (f.id === 'job_type' || f.id === 'status') {
               query += ` AND ${f.id} = ?`
               countQuery += ` AND ${f.id} = ?`
+              queryParams.push(f.value)
+            } else if (f.id === 'location') {
+              query += ' AND location = ?'
+              countQuery += ' AND location = ?'
               queryParams.push(f.value)
             } else if (f.id === 'created_at_start') {
               query += ' AND date(created_at) >= date(?)'
@@ -162,7 +166,12 @@ class CandidateController {
     })
 
     ipcMain.handle('sync-candidate-to-notion', async (_, id: number) => {
-      return await NotionSyncService.syncCandidate(id)
+      try {
+        return await NotionSyncService.syncCandidate(id)
+      } catch (error: any) {
+        console.error('[CandidateController] Notion sync failed:', error)
+        return { success: false, error: error.message }
+      }
     })
 
     ipcMain.handle('update-candidate', async (_, id: number, updates: Record<string, any>) => {
@@ -180,7 +189,8 @@ class CandidateController {
         
         if (setClauses.length === 0) return { success: false, error: 'No valid fields to update' }
         
-        const query = `UPDATE candidates SET ${setClauses.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+        const updatedTimeClause = hasCandidatesUpdatedAt ? ', updated_at = CURRENT_TIMESTAMP' : ''
+        const query = `UPDATE candidates SET ${setClauses.join(', ')}${updatedTimeClause} WHERE id = ?`
         values.push(id)
         db.prepare(query).run(...values)
         return { success: true }
@@ -210,19 +220,23 @@ class CandidateController {
       jobDescription: string
       filters?: CandidateSearchFilter[]
       limit?: number
+      saveToHistory?: boolean
     }) => {
       try {
         const result = await CandidateSearchService.search(params)
-        if (result.success && params.jobDescription.trim()) {
-          db.prepare(`
-            INSERT INTO job_search_history (job_description, filters, result_count, semantic_available)
-            VALUES (?, ?, ?, ?)
-          `).run(
-            params.jobDescription.trim(),
-            JSON.stringify(params.filters || []),
-            result.data.results.length,
-            result.data.semantic.available ? 1 : 0
-          )
+        if (result.success && params.jobDescription.trim() && params.saveToHistory !== false) {
+          const lastRow = db.prepare('SELECT job_description FROM job_search_history ORDER BY created_at DESC LIMIT 1').get() as any
+          if (!lastRow || lastRow.job_description !== params.jobDescription.trim()) {
+            db.prepare(`
+              INSERT INTO job_search_history (job_description, filters, result_count, semantic_available)
+              VALUES (?, ?, ?, ?)
+            `).run(
+              params.jobDescription.trim(),
+              JSON.stringify(params.filters || []),
+              result.data.results.length,
+              result.data.semantic.available ? 1 : 0
+            )
+          }
         }
         return result
       } catch (error: unknown) {
@@ -297,6 +311,99 @@ class CandidateController {
         }
       } catch (error: any) {
         console.error('[CandidateController] Error fetching dashboard stats:', error)
+        return { success: false, error: error.message }
+      }
+    })
+
+    ipcMain.handle('get-distinct-locations', async () => {
+      try {
+        const rows = db.prepare(
+          `SELECT DISTINCT location FROM candidates
+           WHERE location IS NOT NULL AND location != ''
+           ORDER BY location ASC`
+        ).all() as { location: string }[]
+        return { success: true, data: rows.map(r => r.location) }
+      } catch (error: any) {
+        return { success: false, error: error.message }
+      }
+    })
+
+    ipcMain.handle('delete-duplicate-candidates', async () => {
+      try {
+        let deletedCount = 0
+        db.transaction(() => {
+          // 1. Duplicates by Email
+          const duplicateEmails = db.prepare(`
+            SELECT email, id FROM candidates 
+            WHERE email IS NOT NULL AND email != ''
+            AND email IN (SELECT email FROM candidates WHERE email IS NOT NULL AND email != '' GROUP BY email HAVING COUNT(*) > 1)
+            ORDER BY email, id DESC
+          `).all() as { email: string, id: number }[]
+
+          const emailsKeep = new Set<string>()
+          for (const row of duplicateEmails) {
+            if (!emailsKeep.has(row.email)) {
+              emailsKeep.add(row.email)
+            } else {
+              try {
+                VectorSearchService.deleteCandidate(row.id)
+              } catch (e) {}
+              db.prepare('DELETE FROM notion_sync_history WHERE candidate_id = ?').run(row.id)
+              db.prepare('DELETE FROM candidates WHERE id = ?').run(row.id)
+              deletedCount++
+            }
+          }
+
+          // 2. Duplicates by Phone
+          const duplicatePhones = db.prepare(`
+            SELECT phone, id FROM candidates 
+            WHERE phone IS NOT NULL AND phone != ''
+            AND phone IN (SELECT phone FROM candidates WHERE phone IS NOT NULL AND phone != '' GROUP BY phone HAVING COUNT(*) > 1)
+            ORDER BY phone, id DESC
+          `).all() as { phone: string, id: number }[]
+
+          const phonesKeep = new Set<string>()
+          for (const row of duplicatePhones) {
+            if (!phonesKeep.has(row.phone)) {
+              phonesKeep.add(row.phone)
+            } else {
+              try {
+                VectorSearchService.deleteCandidate(row.id)
+              } catch (e) {}
+              db.prepare('DELETE FROM notion_sync_history WHERE candidate_id = ?').run(row.id)
+              db.prepare('DELETE FROM candidates WHERE id = ?').run(row.id)
+              deletedCount++
+            }
+          }
+
+          // 3. Duplicates by Name (First Name + Last Name)
+          const duplicateNames = db.prepare(`
+            SELECT first_name, last_name, id FROM candidates 
+            WHERE (first_name || ' ' || last_name) IN (
+              SELECT (first_name || ' ' || last_name) FROM candidates GROUP BY first_name, last_name HAVING COUNT(*) > 1
+            )
+            ORDER BY first_name, last_name, id DESC
+          `).all() as { first_name: string, last_name: string, id: number }[]
+
+          const namesKeep = new Set<string>()
+          for (const row of duplicateNames) {
+            const key = `${row.first_name}_${row.last_name}`
+            if (!namesKeep.has(key)) {
+              namesKeep.add(key)
+            } else {
+              try {
+                VectorSearchService.deleteCandidate(row.id)
+              } catch (e) {}
+              db.prepare('DELETE FROM notion_sync_history WHERE candidate_id = ?').run(row.id)
+              db.prepare('DELETE FROM candidates WHERE id = ?').run(row.id)
+              deletedCount++
+            }
+          }
+        })()
+
+        return { success: true, deletedCount }
+      } catch (error: any) {
+        console.error('[CandidateController] Error deleting duplicate candidates:', error)
         return { success: false, error: error.message }
       }
     })

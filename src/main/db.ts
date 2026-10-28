@@ -5,7 +5,7 @@ import { join } from 'path'
 // Save database in appData for production, or local folder for dev
 const dbPath = join(app.getPath('userData'), 'database.sqlite')
 console.log(dbPath);
-const db = new Database(dbPath)
+const db: Database.Database = new Database(dbPath)
 
 // Initialize schema
 db.exec(`
@@ -33,7 +33,8 @@ db.exec(`
     summary TEXT,
     raw_text TEXT,
     file_path TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
   CREATE TABLE IF NOT EXISTS notion_sync_history (
@@ -118,7 +119,30 @@ try {
 try {
   db.exec('ALTER TABLE candidates ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP;')
 } catch (e: any) {
-  // Ignore if column already exists
+  if (!e.message.includes('duplicate column name')) {
+    console.error('[db] Error adding updated_at to candidates:', e.message)
+  }
 }
+
+try {
+  db.exec('ALTER TABLE document_tasks ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP;')
+} catch (e: any) {
+  if (!e.message.includes('duplicate column name')) {
+    console.error('[db] Error adding updated_at to document_tasks:', e.message)
+  }
+}
+
+export let hasCandidatesUpdatedAt = false
+export let hasTasksUpdatedAt = false
+
+try {
+  db.prepare('SELECT updated_at FROM candidates LIMIT 1').get()
+  hasCandidatesUpdatedAt = true
+} catch (e) {}
+
+try {
+  db.prepare('SELECT updated_at FROM document_tasks LIMIT 1').get()
+  hasTasksUpdatedAt = true
+} catch (e) {}
 
 export default db

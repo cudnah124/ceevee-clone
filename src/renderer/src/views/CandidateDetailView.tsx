@@ -77,12 +77,17 @@ export function CandidateDetailView({
 
   const handleSyncNotion = async () => {
     setIsSyncingNotion(true);
-    const res = await window.api.syncCandidateToNotion(candidateId);
-    setIsSyncingNotion(false);
-    if (res.success) {
-      toast.success("Successfully synced to Notion!");
-    } else {
-      toast.error(`Sync failed: ${res.error}`);
+    try {
+      const res = await window.api.syncCandidateToNotion(candidateId);
+      if (res?.success) {
+        toast.success("Successfully synced to Notion!");
+      } else {
+        toast.error(`Sync failed: ${res?.error || 'Unknown error'}`);
+      }
+    } catch (e: any) {
+      toast.error(`Sync failed: ${e.message}`);
+    } finally {
+      setIsSyncingNotion(false);
     }
   };
 

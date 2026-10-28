@@ -1,17 +1,38 @@
+import * as fs from 'fs'
 import { GoogleGenAI } from '@google/genai'
 import { IAIProvider } from './IAIProvider'
 
 export class GeminiProvider implements IAIProvider {
-  async generateCompletion(prompt: string, apiKey: string, model: string): Promise<string> {
+  async generateCompletion(prompt: string, apiKey: string, model: string, filePath?: string): Promise<string> {
     const normalizedKey = apiKey.trim()
     if (!normalizedKey) throw new Error('Gemini API key is missing.')
 
     const client = new GoogleGenAI({ apiKey: normalizedKey })
 
+    const contents: any[] = [prompt]
+    if (filePath && fs.existsSync(filePath)) {
+      const fileBuffer = fs.readFileSync(filePath)
+      let mimeType = 'application/pdf'
+      const ext = filePath.split('.').pop()?.toLowerCase()
+      if (ext === 'png') {
+        mimeType = 'image/png'
+      } else if (ext === 'jpg' || ext === 'jpeg') {
+        mimeType = 'image/jpeg'
+      } else if (ext === 'webp') {
+        mimeType = 'image/webp'
+      }
+      contents.push({
+        inlineData: {
+          data: fileBuffer.toString('base64'),
+          mimeType
+        }
+      })
+    }
+
     try {
       const response = await client.models.generateContent({
         model: model || 'gemini-1.5-flash',
-        contents: prompt,
+        contents,
         config: {
           temperature: 0.1
         }

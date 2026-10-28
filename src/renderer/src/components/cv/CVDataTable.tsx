@@ -44,6 +44,7 @@ interface CVDataTableProps {
   tag: string;
   status: string;
   jobType?: string;
+  location?: string;
   dateRange?: DateRange;
   onView: (id: number) => void;
   highlightedCandidateId?: number | null;
@@ -121,6 +122,7 @@ export function CVDataTable({
   tag,
   status,
   jobType,
+  location,
   dateRange,
   onView,
   highlightedCandidateId,
@@ -150,6 +152,8 @@ export function CVDataTable({
         combinedFilters.push({ id: "tags", value: tag });
       if (jobType && jobType !== "all")
         combinedFilters.push({ id: "job_type", value: jobType });
+      if (location && location !== "all")
+        combinedFilters.push({ id: "location", value: location });
 
       if (dateRange?.from) {
         combinedFilters.push({
@@ -187,7 +191,7 @@ export function CVDataTable({
   // Reload completely on filter changes
   useEffect(() => {
     fetchCandidates(0, true);
-  }, [search, tag, status, jobType, dateRange, sorting, columnFilters]);
+  }, [search, tag, status, jobType, location, dateRange, sorting, columnFilters]);
 
   const handleDelete = async (id: number) => {
     const res = await window.api.deleteCandidate(id);

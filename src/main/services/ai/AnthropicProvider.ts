@@ -1,22 +1,64 @@
 import { IAIProvider } from './IAIProvider'
+import * as fs from 'fs'
 
 export class AnthropicProvider implements IAIProvider {
-  async generateCompletion(prompt: string, apiKey: string, model: string): Promise<string> {
+  async generateCompletion(prompt: string, apiKey: string, model: string, filePath?: string): Promise<string> {
     if (!apiKey) throw new Error('Anthropic API key is missing.')
+
+    const headers: Record<string, string> = {
+      'x-api-key': apiKey.trim().replace(/^Bearer\s+/i, ''),
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    }
+
+    let content: any = prompt
+    if (filePath && fs.existsSync(filePath)) {
+      const ext = filePath.split('.').pop()?.toLowerCase()
+      const fileBuffer = fs.readFileSync(filePath)
+      if (ext === 'pdf') {
+        headers['anthropic-beta'] = 'pdfs-2024-09-25'
+        content = [
+          {
+            type: 'document',
+            source: {
+              type: 'base64',
+              media_type: 'application/pdf',
+              data: fileBuffer.toString('base64')
+            }
+          },
+          {
+            type: 'text',
+            text: prompt
+          }
+        ]
+      } else if (['png', 'jpg', 'jpeg', 'webp'].includes(ext || '')) {
+        const media_type = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg'
+        content = [
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type,
+              data: fileBuffer.toString('base64')
+            }
+          },
+          {
+            type: 'text',
+            text: prompt
+          }
+        ]
+      }
+    }
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {
-        'x-api-key': apiKey.trim().replace(/^Bearer\s+/i, ''),
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
+      headers,
       body: JSON.stringify({
         model: model || 'claude-3-haiku-20240307',
         max_tokens: 1024,
         temperature: 0.1,
         messages: [
-          { role: 'user', content: prompt }
+          { role: 'user', content }
         ]
       })
     })

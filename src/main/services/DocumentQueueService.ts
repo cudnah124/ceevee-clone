@@ -1,4 +1,4 @@
-import db from '../db'
+import db, { hasTasksUpdatedAt } from '../db'
 import { FileParsingService } from './FileParsingService'
 import { AIProcessingService } from './AIProcessingService'
 import { KeyStoreService } from './KeyStoreService'
@@ -76,23 +76,66 @@ export class DocumentQueueService {
 
     // 1. Extract
     this.updateTaskStatus(taskId, 'Extracting', filePath)
-    const rawText = await FileParsingService.parseFile(filePath, (status) => {
-      this.updateTaskStatus(taskId, status, filePath)
-    })
-
-    // 2. AI Processing
-    this.updateTaskStatus(taskId, 'Analyzing', filePath)
-
-    // Fetch decrypted API Key
-    const activeProvider = provider || 'openrouter' // Default fallback
-    const keyRow = db.prepare('SELECT encrypted_key, iv, auth_tag, model FROM api_key_store WHERE provider = ?').get(activeProvider) as any
-    if (!keyRow) {
-      throw new Error(`API Key for ${activeProvider} not configured. Please add it in settings.`)
+    let rawText = ''
+    try {
+      rawText = await FileParsingService.parseFile(filePath, (status) => {
+        this.updateTaskStatus(taskId, status, filePath)
+      })
+    } catch (parseError: any) {
+      console.warn('[Queue] Initial parser failed:', parseError.message)
     }
 
-    const decryptedKey = KeyStoreService.decrypt(keyRow.encrypted_key, keyRow.iv, keyRow.auth_tag)
+    let extractedData: any = null
+    const isTextTooShort = !rawText || rawText.trim().length < 100
 
-    const extractedData = await AIProcessingService.extractCandidateData(rawText, activeProvider, decryptedKey, keyRow.model)
+    if (isTextTooShort) {
+      const ocrProviderRow = db.prepare("SELECT setting_value FROM app_settings WHERE setting_key = 'ocr_provider'").get() as any
+      const ocrProvider = ocrProviderRow?.setting_value || 'none'
+
+      if (ocrProvider !== 'none') {
+        console.log(`[Queue] Text is too short. Falling back to LLM OCR with provider ${ocrProvider}`)
+        this.updateTaskStatus(taskId, 'LLM OCR...', filePath)
+        
+        const ocrKeyRow = db.prepare("SELECT encrypted_key, iv, auth_tag FROM api_key_store WHERE provider = 'ocr'").get() as any
+        const ocrModelRow = db.prepare("SELECT setting_value FROM app_settings WHERE setting_key = 'ocr_model'").get() as any
+        
+        if (ocrKeyRow) {
+          const decryptedOcrKey = KeyStoreService.decrypt(ocrKeyRow.encrypted_key, ocrKeyRow.iv, ocrKeyRow.auth_tag)
+          const ocrModel = ocrModelRow?.setting_value || 'gemini-1.5-flash'
+          
+          try {
+            extractedData = await AIProcessingService.extractCandidateData(
+              '',
+              ocrProvider,
+              decryptedOcrKey,
+              ocrModel,
+              filePath
+            )
+            rawText = `[Extracted via Multimodal LLM OCR (${ocrProvider} / ${ocrModel})]`
+          } catch (ocrErr: any) {
+            console.error('[Queue] LLM OCR Fallback failed:', ocrErr)
+            throw new Error(`Standard parsing failed and LLM OCR fallback failed: ${ocrErr.message}`)
+          }
+        } else {
+          throw new Error('Standard parsing failed. LLM OCR is enabled but API Key is not configured.')
+        }
+      } else {
+        throw new Error('Standard parsing failed (text too short or unreadable) and no LLM OCR fallback is configured.')
+      }
+    }
+
+    // 2. AI Processing
+    if (!extractedData) {
+      this.updateTaskStatus(taskId, 'Analyzing', filePath)
+      const activeProvider = provider || 'openrouter' // Default fallback
+      const keyRow = db.prepare('SELECT encrypted_key, iv, auth_tag, model FROM api_key_store WHERE provider = ?').get(activeProvider) as any
+      if (!keyRow) {
+        throw new Error(`API Key for ${activeProvider} not configured. Please add it in settings.`)
+      }
+
+      const decryptedKey = KeyStoreService.decrypt(keyRow.encrypted_key, keyRow.iv, keyRow.auth_tag)
+      extractedData = await AIProcessingService.extractCandidateData(rawText, activeProvider, decryptedKey, keyRow.model)
+    }
 
     // 3. Save to Candidates Table
     const insertCandidate = db.prepare(`
@@ -137,11 +180,12 @@ export class DocumentQueueService {
   }
 
   private updateTaskStatus(taskId: number, status: string, context?: string, errorMessage?: string) {
+    const updatedTimeClause = hasTasksUpdatedAt ? ', updated_at = CURRENT_TIMESTAMP' : ''
     if (errorMessage !== undefined) {
-      db.prepare(`UPDATE document_tasks SET status = ?, error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      db.prepare(`UPDATE document_tasks SET status = ?, error_message = ?${updatedTimeClause} WHERE id = ?`)
         .run(status, errorMessage, taskId)
     } else {
-      db.prepare(`UPDATE document_tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      db.prepare(`UPDATE document_tasks SET status = ?${updatedTimeClause} WHERE id = ?`)
         .run(status, taskId)
     }
 

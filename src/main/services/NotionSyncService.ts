@@ -58,47 +58,68 @@ export class NotionSyncService {
       if (candidate.status) properties['Status'] = { select: { name: candidate.status } }
 
       let children: any[] = []
-      if (candidate.file_path) {
-        try {
 
-          const path = require('path')
-          const ext = path.extname(candidate.file_path).toLowerCase()
-          let mimeType = 'application/pdf'
-          if (ext === '.docx') mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-          else if (ext === '.doc') mimeType = 'application/msword'
-          else if (ext === '.txt') mimeType = 'text/plain'
+      // Add candidate summary to page body
+      if (candidate.summary) {
+        children.push({
+          object: 'block',
+          type: 'heading_3',
+          heading_3: {
+            rich_text: [{ text: { content: 'Candidate Summary' } }]
+          }
+        })
+        children.push({
+          object: 'block',
+          type: 'paragraph',
+          paragraph: {
+            rich_text: [{ text: { content: candidate.summary } }]
+          }
+        })
+        children.push({
+          object: 'block',
+          type: 'divider',
+          divider: {}
+        })
+      }
 
-          if (onProgress) onProgress('Uploading CV to Notion')
-          const fileUploadId = await notion.fileUploads.create({
-            mode: 'single_part'
-          });
-          
-          const { buffer, byteOffset, length } = await fs.readFile(candidate.file_path)
-          await notion.fileUploads.send({
-            file_upload_id: fileUploadId.id,
-            file: {
-              filename: path.basename(candidate.file_path),
-              data: new Blob([new Uint8Array(buffer, byteOffset, length)], { type: mimeType })
-            },
-          })
+        if (candidate.file_path) {
+          try {
+            const path = require('path')
+            const ext = path.extname(candidate.file_path).toLowerCase()
+            let mimeType = 'application/pdf'
+            if (ext === '.docx') mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            else if (ext === '.doc') mimeType = 'application/msword'
+            else if (ext === '.txt') mimeType = 'text/plain'
 
-          if (onProgress) onProgress('Attaching CV to Notion Page')
+            if (onProgress) onProgress('Uploading CV to Notion')
+            const fileUploadResponse = await notion.fileUploads.create({
+              mode: 'single_part'
+            });
 
-          if (fileUploadId) {
+            const { buffer, byteOffset, length } = await fs.readFile(candidate.file_path)
+            await notion.fileUploads.send({
+              file_upload_id: fileUploadResponse.id,
+              file: {
+                filename: path.basename(candidate.file_path),
+                data: new Blob([new Uint8Array(buffer, byteOffset, length)], { type: mimeType })
+              },
+            })
+
+            // Only attach the block if BOTH create + send succeeded
+            if (onProgress) onProgress('Attaching CV to Notion Page')
             children.push({
               object: 'block',
               type: 'file',
               file: {
                 type: 'file_upload',
-                file_upload: { id: fileUploadId.id }
+                file_upload: { id: fileUploadResponse.id }
               }
             })
+          } catch (uploadErr: any) {
+            console.error('[NotionSyncService] Failed to upload CV file:', uploadErr)
+            // Continue creating page without the file attachment
           }
-        } catch (uploadErr: any) {
-          console.error('[NotionSyncService] Failed to upload CV file:', uploadErr)
-          // Continue creating page even if file upload fails – but we'll note it
         }
-      }
 
       let response: any
       try {
